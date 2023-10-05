@@ -155,7 +155,6 @@ class Llama:
             If logprobs is True, token log probabilities are computed for each generated token.
 
         """
-        vect_embeddings = None
         params = self.model.params
         bsz = len(prompt_tokens)
         assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
@@ -175,8 +174,11 @@ class Llama:
         prev_pos = 0
         eos_reached = torch.tensor([False] * bsz, device="cuda")
         input_text_mask = tokens != pad_id
+
+        vect_embeddings = []
         if min_prompt_len == total_len:
-            logits, vect_embeddings = self.model.forward(tokens, prev_pos)
+            logits, vect_embedding = self.model.forward(tokens, prev_pos)
+            vect_embeddings.append(vect_embedding)
             token_logprobs = -F.cross_entropy(
                 input=logits.transpose(1, 2),
                 target=tokens,
@@ -185,7 +187,8 @@ class Llama:
             )
 
         for cur_pos in range(min_prompt_len, total_len):
-            logits, vect_embeddings = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
+            logits, vect_embedding = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
+            vect_embeddings.append(vect_embedding)
             if temperature > 0:
                 probs = torch.softmax(logits[:, -1] / temperature, dim=-1)
                 next_token = sample_top_p(probs, top_p)
@@ -282,7 +285,8 @@ class Llama:
                 for t, logprobs_i in zip(generation_tokens, generation_logprobs)
             ]
 
-        return [{"generation": self.tokenizer.decode(t), "vect_embeddings": vect_embeddings} for t in generation_tokens]
+        return [{"generation": self.tokenizer.decode(t), "vect_embeddings": e}
+                for t, e in zip(generation_tokens, vect_embeddings)]
 
     def chat_completion(
         self,
